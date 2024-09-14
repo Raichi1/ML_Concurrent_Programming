@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	split "src/data"
+	ann "src/models/ann"
 	recommendation "src/models/colaborative_filter"
 	decisiontree "src/models/decision_tree"
+	randomforest "src/models/random_forest"
 	svmachine "src/models/svm"
 	"strconv"
 	"time"
@@ -48,6 +50,16 @@ func readCSV(filePath string, skipHeader bool) ([][]string, error) {
 	}
 
 	return records, nil
+}
+
+func convertToInt(lista []float64) []int {
+	intList := make([]int, len(lista))
+
+	for i, f := range lista {
+		intList[i] = int(f)
+	}
+
+	return intList
 }
 
 func convertToFloat(records [][]string) ([][]float64, error) {
@@ -197,8 +209,8 @@ func colaborativeFilter() {
 	fmt.Printf("Tiempo de ejecución: %s\n", elapsed)
 }
 
-func svmSecuential() {
-	features, target, _ := getDataFrame("dataset/bank.csv", true)
+func svmSecuential(filepath string) {
+	features, target, _ := getDataFrame(filepath, true)
 
 	train, test, labelTrain, labelTest, err := split.SplitData(features, target, 0.2)
 
@@ -211,8 +223,8 @@ func svmSecuential() {
 
 }
 
-func svmConcurrent() {
-	features, target, _ := getDataFrame("dataset/bank.csv", true)
+func svmConcurrent(filepath string) {
+	features, target, _ := getDataFrame(filepath, true)
 
 	train, test, labelTrain, labelTest, err := split.SplitData(features, target, 0.2)
 
@@ -224,20 +236,56 @@ func svmConcurrent() {
 	svmachine.SVMConcurrent(train, labelTrain, test, labelTest)
 }
 
-func decisionTreeSecuencial() {
-	features, labels, _ := getDataFrame("dataset/bank.csv", true)
+func decisionTreeSecuencial(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
 
 	decisiontree.DecisionTreeSec(features, labels)
 
 }
 
-func decisionTreeConcurrent() {
-	features, labels, _ := getDataFrame("dataset/bank.csv", true)
+func decisionTreeConcurrent(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
 
 	decisiontree.DecisionTreeConcurrente(features, labels)
 }
 
+func annSecuential(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
+
+	ann.ANNSecuential(features, labels)
+}
+
+func annConcurrent(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
+
+	ann.ANNConcurrent(features, labels)
+}
+
+func rfSecuential(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
+
+	train, test, trainLabel, testLabel, _ := split.SplitData(features, labels, 0.2)
+
+	trainL := convertToInt(trainLabel)
+	testL := convertToInt(testLabel)
+
+	randomforest.RandomForestSecuential(train, trainL, test, testL)
+}
+
+func rfConcurrent(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
+
+	train, test, trainLabel, testLabel, _ := split.SplitData(features, labels, 0.2)
+
+	trainL := convertToInt(trainLabel)
+	testL := convertToInt(testLabel)
+
+	randomforest.RandomForestSecuential(train, trainL, test, testL)
+}
+
 func main() {
+
+	filepath := "dataset/bank.csv"
 
 	fmt.Printf("=================================================\n")
 	fmt.Printf("FILTRADO COLABORATIVO CONCURRENTE\n")
@@ -246,15 +294,27 @@ func main() {
 	fmt.Printf("FILTRADO COLABORATIVO SECUENCIAL\n")
 	colaborativeFilter()
 	fmt.Printf("=================================================\n")
-	fmt.Printf("SUPPORT VECTORIAL MACHINE SECUENCIAL\n")
-	svmSecuential()
-	fmt.Printf("=================================================\n")
 	fmt.Printf("SUPPORT VECTORIAL MACHINE CONCURRENTE\n")
-	svmConcurrent()
+	svmConcurrent(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("SUPPORT VECTORIAL MACHINE SECUENCIAL\n")
+	svmSecuential(filepath)
 	fmt.Printf("=================================================\n")
 	fmt.Printf("DECISION TREE SECUENCIAL\n")
-	decisionTreeSecuencial()
+	decisionTreeSecuencial(filepath)
 	fmt.Printf("=================================================\n")
 	fmt.Printf("DECISION TREE CONCURRENTE\n")
-	decisionTreeConcurrent()
+	decisionTreeConcurrent(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("ARTIFICIAL NEURONAL NETWORK SECUENTIAL\n")
+	annSecuential(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("ARTIFICIAL NEURONAL NETWORK CONCURRENTE\n")
+	annConcurrent(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("RANDOM FOREST SECUENTIAL\n")
+	rfSecuential(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("RANDOM FOREST CONCURRENT\n")
+	rfSecuential(filepath)
 }

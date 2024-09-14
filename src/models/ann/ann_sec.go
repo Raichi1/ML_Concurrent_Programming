@@ -1,34 +1,52 @@
-package main
+package ann
 
 import (
 	"fmt"
 	"math"
 	"math/rand"
+	"time"
 )
 
 // Red Neuronal Artificial (ANN)
 type ANN struct {
-	weights                           [][]float64
-	bias                              []float64
+	weights1, weights2                [][]float64
+	bias1, bias2                      []float64
 	inputSize, hiddenSize, outputSize int
 }
 
 // Inicializa la red neuronal
 func newANN(inputSize, hiddenSize, outputSize int) *ANN {
-	weights := make([][]float64, inputSize+hiddenSize)
-	for i := range weights {
-		weights[i] = make([]float64, hiddenSize+outputSize)
-		for j := range weights[i] {
-			weights[i][j] = rand.Float64()*2 - 1
+	weights1 := make([][]float64, inputSize)
+	for i := range weights1 {
+		weights1[i] = make([]float64, hiddenSize)
+		for j := range weights1[i] {
+			weights1[i][j] = rand.Float64()*2 - 1
 		}
 	}
-	bias := make([]float64, hiddenSize+outputSize)
-	for i := range bias {
-		bias[i] = rand.Float64()*2 - 1
+
+	weights2 := make([][]float64, hiddenSize)
+	for i := range weights2 {
+		weights2[i] = make([]float64, outputSize)
+		for j := range weights2[i] {
+			weights2[i][j] = rand.Float64()*2 - 1
+		}
 	}
+
+	bias1 := make([]float64, hiddenSize)
+	for i := range bias1 {
+		bias1[i] = rand.Float64()*2 - 1
+	}
+
+	bias2 := make([]float64, outputSize)
+	for i := range bias2 {
+		bias2[i] = rand.Float64()*2 - 1
+	}
+
 	return &ANN{
-		weights:    weights,
-		bias:       bias,
+		weights1:   weights1,
+		weights2:   weights2,
+		bias1:      bias1,
+		bias2:      bias2,
 		inputSize:  inputSize,
 		hiddenSize: hiddenSize,
 		outputSize: outputSize,
@@ -53,18 +71,18 @@ func (ann *ANN) forward(inputs []float64) []float64 {
 
 	// Cálculo de la capa oculta
 	for i := range hiddenLayer {
-		sum := ann.bias[i]
+		sum := ann.bias1[i]
 		for j := range inputs {
-			sum += inputs[j] * ann.weights[j][i]
+			sum += inputs[j] * ann.weights1[j][i]
 		}
 		hiddenLayer[i] = sigmoid(sum)
 	}
 
 	// Cálculo de la capa de salida
 	for i := range outputLayer {
-		sum := ann.bias[ann.hiddenSize+i]
+		sum := ann.bias2[i]
 		for j := range hiddenLayer {
-			sum += hiddenLayer[j] * ann.weights[ann.inputSize+j][i]
+			sum += hiddenLayer[j] * ann.weights2[j][i]
 		}
 		outputLayer[i] = sigmoid(sum)
 	}
@@ -72,12 +90,15 @@ func (ann *ANN) forward(inputs []float64) []float64 {
 	return outputLayer
 }
 
-// Función de error cuadrático medio
-func meanSquaredError(yTrue, yPred []float64) float64 {
+// Función de entropía cruzada para clasificación binaria
+func crossEntropy(yTrue, yPred []float64) float64 {
 	sum := 0.0
 	for i := range yTrue {
-		diff := yTrue[i] - yPred[i]
-		sum += diff * diff
+		if yTrue[i] == 1 {
+			sum += -math.Log(yPred[i] + 1e-15)
+		} else {
+			sum += -math.Log(1 - yPred[i] + 1e-15)
+		}
 	}
 	return sum / float64(len(yTrue))
 }
@@ -95,7 +116,7 @@ func (ann *ANN) backpropagate(inputs []float64, labels []float64, output []float
 	for i := range hiddenLayerError {
 		sum := 0.0
 		for j := range outputError {
-			sum += outputError[j] * ann.weights[ann.inputSize+i][j]
+			sum += outputError[j] * ann.weights2[i][j]
 		}
 		hiddenLayerError[i] = sigmoidDeriv(sum) * sum
 	}
@@ -103,39 +124,40 @@ func (ann *ANN) backpropagate(inputs []float64, labels []float64, output []float
 	// Actualizar pesos y sesgos
 	for i := 0; i < ann.inputSize; i++ {
 		for j := 0; j < ann.hiddenSize; j++ {
-			ann.weights[i][j] += learningRate * hiddenLayerError[j] * inputs[i]
+			ann.weights1[i][j] += learningRate * hiddenLayerError[j] * inputs[i]
 		}
 	}
+
 	for i := 0; i < ann.hiddenSize; i++ {
 		for j := 0; j < ann.outputSize; j++ {
-			ann.weights[ann.inputSize+i][j] += learningRate * outputError[j] * sigmoidDeriv(hiddenLayerError[i])
+			ann.weights2[i][j] += learningRate * outputError[j] * hiddenLayerError[i]
 		}
 	}
-	for i := range ann.bias {
-		if i < ann.hiddenSize {
-			ann.bias[i] += learningRate * hiddenLayerError[i]
-		} else {
-			ann.bias[i] += learningRate * outputError[i-ann.hiddenSize]
-		}
+
+	for i := range ann.bias1 {
+		ann.bias1[i] += learningRate * hiddenLayerError[i]
+	}
+	for i := range ann.bias2 {
+		ann.bias2[i] += learningRate * outputError[i]
 	}
 }
 
 // Entrenamiento de la red neuronal
-func (ann *ANN) train(data [][]float64, labels [][]float64, epochs int, learningRate float64) {
+func (ann *ANN) train(data [][]float64, labels []float64, epochs int, learningRate float64) {
 	for epoch := 0; epoch < epochs; epoch++ {
 		for i := range data {
 			output := ann.forward(data[i])
-			ann.backpropagate(data[i], labels[i], output, learningRate)
+			ann.backpropagate(data[i], []float64{labels[i]}, output, learningRate)
 		}
 	}
 }
 
-// Métricas de evaluación
-func evaluate(predictions, labels [][]float64) (float64, float64, float64) {
+// Función de evaluación para entropía cruzada
+func evaluate(predictions []float64, labels []float64) (float64, float64, float64) {
 	var tp, fp, fn, tn float64
 	for i := range predictions {
-		pred := predictions[i][0] > 0.5
-		trueLabel := labels[i][0] > 0.5
+		pred := predictions[i] > 0.5
+		trueLabel := labels[i] > 0.5
 
 		if pred && trueLabel {
 			tp++
@@ -155,29 +177,27 @@ func evaluate(predictions, labels [][]float64) (float64, float64, float64) {
 	return precision, recall, f1
 }
 
-func main() {
-	rand.Seed(42)
+// Nueva función para ejecutar la red neuronal
+func ANNSecuential(data [][]float64, labels []float64) {
+
+	start := time.Now()
 
 	// Definir dimensiones
-	inputSize := 3
+	inputSize := len(data[0])
 	hiddenSize := 5
 	outputSize := 1
 
 	// Crear red neuronal
 	ann := newANN(inputSize, hiddenSize, outputSize)
 
-	// Datos de ejemplo
-	data := [][]float64{{0.1, 0.2, 0.3}, {0.4, 0.5, 0.6}}
-	labels := [][]float64{{0.0}, {1.0}}
-
 	// Entrenar red neuronal
-	ann.train(data, labels, 100, 0.01)
+	ann.train(data, labels, 1000, 0.00001)
 
 	// Hacer predicciones
-	predictions := make([][]float64, len(data))
+	predictions := make([]float64, len(data))
 	for i, d := range data {
-		predictions[i] = ann.forward(d)
-		// fmt.Printf("Prediction for %v: %v\n", d, predictions[i])
+		pred := ann.forward(d)[0]
+		predictions[i] = pred
 	}
 
 	// Evaluar el modelo
@@ -185,4 +205,7 @@ func main() {
 	fmt.Printf("Precision: %v\n", precision)
 	fmt.Printf("Recall: %v\n", recall)
 	fmt.Printf("F1 Score: %v\n", f1)
+
+	elapsed := time.Since(start)
+	fmt.Printf("Tiempo de ejecución: %s\n", elapsed)
 }
