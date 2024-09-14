@@ -1,153 +1,135 @@
 package data
 
-import (
-	"math"
-	"math/rand"
-	"sync"
-)
+// import (
+// 	"math"
+// 	"math/rand"
+// 	"sync"
+// )
 
-func generateData(size int) ([]int, []int) {
-	actual := make([]int, size)
-	predicted := make([]int, size)
-	for i := 0; i < size; i++ {
-		actual[i] = rand.Intn(2) // Genera 0 o 1
-		predicted[i] = rand.Intn(2)
-	}
-	return actual, predicted
-}
+// func generateData(size int) ([]int, []int) {
+// 	actual := make([]int, size)
+// 	predicted := make([]int, size)
+// 	for i := 0; i < size; i++ {
+// 		actual[i] = rand.Intn(2) // Genera 0 o 1
+// 		predicted[i] = rand.Intn(2)
+// 	}
+// 	return actual, predicted
+// }
 
-// Función para dividir los datos
-func splitData(data [][]float64, labels []float64, feature int, threshold float64) ([][]float64, [][]float64, []float64, []float64) {
-	var leftData, rightData [][]float64
-	var leftLabels, rightLabels []float64
+// // Función para calcular la impureza Gini
+// func giniImpurity(labels []float64) float64 {
+// 	labelCounts := make(map[float64]int)
 
-	for i, point := range data {
-		if point[feature] <= threshold {
-			leftData = append(leftData, point)
-			leftLabels = append(leftLabels, labels[i])
-		} else {
-			rightData = append(rightData, point)
-			rightLabels = append(rightLabels, labels[i])
-		}
-	}
+// 	for _, label := range labels {
+// 		labelCounts[label]++
+// 	}
 
-	return leftData, rightData, leftLabels, rightLabels
-}
+// 	impurity := 1.0
+// 	total := float64(len(labels))
 
-// Función para calcular la impureza Gini
-func giniImpurity(labels []float64) float64 {
-	labelCounts := make(map[float64]int)
+// 	for _, count := range labelCounts {
+// 		probability := float64(count) / total
+// 		impurity -= probability * probability
+// 	}
 
-	for _, label := range labels {
-		labelCounts[label]++
-	}
+// 	return impurity
+// }
 
-	impurity := 1.0
-	total := float64(len(labels))
+// func entropy(labels []float64) float64 {
+// 	labelCounts := make(map[float64]int)
+// 	for _, label := range labels {
+// 		labelCounts[label]++
+// 	}
 
-	for _, count := range labelCounts {
-		probability := float64(count) / total
-		impurity -= probability * probability
-	}
+// 	entropy := 0.0
+// 	total := float64(len(labels))
+// 	for _, count := range labelCounts {
+// 		probability := float64(count) / total
+// 		entropy -= probability * math.Log2(probability)
+// 	}
 
-	return impurity
-}
+// 	return entropy
+// }
 
-func entropy(labels []float64) float64 {
-	labelCounts := make(map[float64]int)
-	for _, label := range labels {
-		labelCounts[label]++
-	}
+// // Función para encontrar la mejor división
+// func findBestSplit(data [][]float64, labels []float64) (int, float64) {
+// 	bestFeature := -1
+// 	bestThreshold := 0.0
+// 	bestImpurity := math.Inf(1)
 
-	entropy := 0.0
-	total := float64(len(labels))
-	for _, count := range labelCounts {
-		probability := float64(count) / total
-		entropy -= probability * math.Log2(probability)
-	}
+// 	for feature := range data[0] {
+// 		uniqueValues := make(map[float64]bool)
+// 		for _, point := range data {
+// 			uniqueValues[point[feature]] = true
+// 		}
 
-	return entropy
-}
+// 		for threshold := range uniqueValues {
+// 			_, _, leftLabels, rightLabels := splitData(data, labels, feature, threshold)
+// 			if len(leftLabels) == 0 || len(rightLabels) == 0 {
+// 				continue
+// 			}
 
-// Función para encontrar la mejor división
-func findBestSplit(data [][]float64, labels []float64) (int, float64) {
-	bestFeature := -1
-	bestThreshold := 0.0
-	bestImpurity := math.Inf(1)
+// 			leftImpurity := giniImpurity(leftLabels)
+// 			rightImpurity := giniImpurity(rightLabels)
+// 			totalImpurity := (leftImpurity*float64(len(leftLabels)) + rightImpurity*float64(len(rightLabels))) / float64(len(labels))
 
-	for feature := range data[0] {
-		uniqueValues := make(map[float64]bool)
-		for _, point := range data {
-			uniqueValues[point[feature]] = true
-		}
+// 			if totalImpurity < bestImpurity {
+// 				bestImpurity = totalImpurity
+// 				bestFeature = feature
+// 				bestThreshold = threshold
+// 			}
+// 		}
+// 	}
 
-		for threshold := range uniqueValues {
-			leftData, rightData, leftLabels, rightLabels := splitData(data, labels, feature, threshold)
-			if len(leftLabels) == 0 || len(rightLabels) == 0 {
-				continue
-			}
+// 	return bestFeature, bestThreshold
+// }
 
-			leftImpurity := giniImpurity(leftLabels)
-			rightImpurity := giniImpurity(rightLabels)
-			totalImpurity := (leftImpurity*float64(len(leftLabels)) + rightImpurity*float64(len(rightLabels))) / float64(len(labels))
+// func findBestSplitConcurrent(data [][]float64, labels []float64) (int, float64) {
+// 	bestFeature := -1
+// 	bestThreshold := 0.0
+// 	bestImpurity := math.Inf(1)
+// 	var mu sync.Mutex
+// 	var wg sync.WaitGroup
 
-			if totalImpurity < bestImpurity {
-				bestImpurity = totalImpurity
-				bestFeature = feature
-				bestThreshold = threshold
-			}
-		}
-	}
+// 	for feature := range data[0] {
+// 		// Crear un mapa de valores únicos para la característica
+// 		uniqueValues := make(map[float64]bool)
+// 		for _, point := range data {
+// 			uniqueValues[point[feature]] = true
+// 		}
 
-	return bestFeature, bestThreshold
-}
+// 		// Para cada valor único, evaluar la división
+// 		for threshold := range uniqueValues {
+// 			wg.Add(1)
+// 			go func(feature int, threshold float64) {
+// 				defer wg.Done()
+// 				// Obtener subconjuntos de datos con base en la característica y el umbral
+// 				leftData, rightData, leftLabels, rightLabels := splitData(data, labels, feature, threshold)
 
-func findBestSplitConcurrent(data [][]float64, labels []float64) (int, float64) {
-	bestFeature := -1
-	bestThreshold := 0.0
-	bestImpurity := math.Inf(1)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+// 				// Si alguna división está vacía, no es válida
+// 				if len(leftLabels) == 0 || len(rightLabels) == 0 {
+// 					return
+// 				}
 
-	for feature := range data[0] {
-		// Crear un mapa de valores únicos para la característica
-		uniqueValues := make(map[float64]bool)
-		for _, point := range data {
-			uniqueValues[point[feature]] = true
-		}
+// 				// Calcular las impurezas de Gini para los subconjuntos
+// 				leftImpurity := giniImpurity(leftLabels)
+// 				rightImpurity := giniImpurity(rightLabels)
+// 				totalImpurity := (leftImpurity*float64(len(leftLabels)) + rightImpurity*float64(len(rightLabels))) / float64(len(labels))
 
-		// Para cada valor único, evaluar la división
-		for threshold := range uniqueValues {
-			wg.Add(1)
-			go func(feature int, threshold float64) {
-				defer wg.Done()
-				// Obtener subconjuntos de datos con base en la característica y el umbral
-				leftData, rightData, leftLabels, rightLabels := splitData(data, labels, feature, threshold)
+// 				// Bloquear el acceso a las variables compartidas para evitar condiciones de carrera
+// 				mu.Lock()
+// 				defer mu.Unlock()
+// 				if totalImpurity < bestImpurity {
+// 					bestImpurity = totalImpurity
+// 					bestFeature = feature
+// 					bestThreshold = threshold
+// 				}
 
-				// Si alguna división está vacía, no es válida
-				if len(leftLabels) == 0 || len(rightLabels) == 0 {
-					return
-				}
+// 			}(feature, threshold)
+// 		}
+// 	}
 
-				// Calcular las impurezas de Gini para los subconjuntos
-				leftImpurity := giniImpurity(leftLabels)
-				rightImpurity := giniImpurity(rightLabels)
-				totalImpurity := (leftImpurity*float64(len(leftLabels)) + rightImpurity*float64(len(rightLabels))) / float64(len(labels))
-
-				// Bloquear el acceso a las variables compartidas para evitar condiciones de carrera
-				mu.Lock()
-				defer mu.Unlock()
-				if totalImpurity < bestImpurity {
-					bestImpurity = totalImpurity
-					bestFeature = feature
-					bestThreshold = threshold
-				}
-
-			}(feature, threshold)
-		}
-	}
-
-	// Esperar a que todas las goroutines terminen
-	wg.Wait()
-	return bestFeature, bestThreshold
-}
+// 	// Esperar a que todas las goroutines terminen
+// 	wg.Wait()
+// 	return bestFeature, bestThreshold
+// }

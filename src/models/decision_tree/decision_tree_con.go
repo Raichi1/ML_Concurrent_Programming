@@ -1,23 +1,14 @@
-package main
+package decisiontree
 
 import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 )
 
-// Define the structure for the Decision Tree Node
-type TreeNode struct {
-	Feature   int
-	Threshold float64
-	Left      *TreeNode
-	Right     *TreeNode
-	Label     float64
-	IsLeaf    bool
-}
-
-// Function to split data based on feature and threshold
-func splitData(data [][]float64, labels []float64, feature int, threshold float64) ([][]float64, [][]float64, []float64, []float64) {
+// Función para dividir los datos basada en el feature y threshold de manera concurrente
+func splitDataConcurrente(data [][]float64, labels []float64, feature int, threshold float64) ([][]float64, [][]float64, []float64, []float64) {
 	var leftData, rightData [][]float64
 	var leftLabels, rightLabels []float64
 
@@ -34,178 +25,174 @@ func splitData(data [][]float64, labels []float64, feature int, threshold float6
 	return leftData, rightData, leftLabels, rightLabels
 }
 
-// Function to calculate Gini impurity
-func giniImpurity(labels []float64) float64 {
-	labelCounts := make(map[float64]int)
-	for _, label := range labels {
-		labelCounts[label]++
+// Función para entrenar el árbol de decisión concurrentemente
+func trainDecisionTreeConcurrente(data [][]float64, labels []float64, depth int) *Node {
+	if depth == 0 || len(data) == 0 {
+		return &Node{Prediction: mean(labels)}
 	}
 
-	impurity := 1.0
-	total := float64(len(labels))
-	for _, count := range labelCounts {
-		probability := float64(count) / total
-		impurity -= probability * probability
+	bestFeature, bestThreshold := findBestSplitConcurrente(data, labels)
+	if bestFeature == -1 {
+		return &Node{Prediction: mean(labels)}
 	}
 
-	return impurity
+	leftData, rightData, leftLabels, rightLabels := splitDataConcurrente(data, labels, bestFeature, bestThreshold)
+
+	if len(leftData) == 0 || len(rightData) == 0 {
+		return &Node{Prediction: mean(labels)}
+	}
+
+	// Uso de goroutines para entrenar los subárboles izquierdo y derecho en paralelo
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var leftNode, rightNode *Node
+
+	go func() {
+		defer wg.Done()
+		leftNode = trainDecisionTreeConcurrente(leftData, leftLabels, depth-1)
+	}()
+
+	go func() {
+		defer wg.Done()
+		rightNode = trainDecisionTreeConcurrente(rightData, rightLabels, depth-1)
+	}()
+
+	wg.Wait()
+
+	return &Node{
+		Feature:   bestFeature,
+		Threshold: bestThreshold,
+		Left:      leftNode,
+		Right:     rightNode,
+	}
 }
 
-// Function to find the best split (concurrent version)
-func findBestSplit(data [][]float64, labels []float64) (int, float64) {
+// Función para encontrar la mejor división concurrentemente
+func findBestSplitConcurrente(data [][]float64, labels []float64) (int, float64) {
 	bestFeature := -1
 	bestThreshold := 0.0
 	bestImpurity := math.Inf(1)
-	var mu sync.Mutex
-
-	var wg sync.WaitGroup
 	numFeatures := len(data[0])
-	for feature := 0; feature < numFeatures; feature++ {
-		wg.Add(1)
-		go func(feature int) {
-			defer wg.Done()
-			uniqueValues := make(map[float64]bool)
-			for _, point := range data {
-				uniqueValues[point[feature]] = true
-			}
 
-			for threshold := range uniqueValues {
-				_, _, leftLabels, rightLabels := splitData(data, labels, feature, threshold)
-				if len(leftLabels) == 0 || len(rightLabels) == 0 {
-					continue
-				}
-
-				leftImpurity := giniImpurity(leftLabels)
-				rightImpurity := giniImpurity(rightLabels)
-				totalImpurity := (leftImpurity*float64(len(leftLabels)) + rightImpurity*float64(len(rightLabels))) / float64(len(labels))
-
-				mu.Lock()
-				if totalImpurity < bestImpurity {
-					bestImpurity = totalImpurity
-					bestFeature = feature
-					bestThreshold = threshold
-				}
-				mu.Unlock()
-			}
-		}(feature)
+	// Canal para compartir resultados de las divisiones
+	type SplitResult struct {
+		feature       int
+		threshold     float64
+		totalImpurity float64
 	}
 
-	wg.Wait()
+	resultChan := make(chan SplitResult, numFeatures)
+
+	// Función que calcula la mejor división para un feature dado
+	var wg sync.WaitGroup
+	featureWorker := func(feature int) {
+		defer wg.Done()
+
+		uniqueValues := make(map[float64]bool)
+		for _, point := range data {
+			uniqueValues[point[feature]] = true
+		}
+
+		bestFeatureImpurity := math.Inf(1)
+		bestFeatureThreshold := 0.0
+
+		for threshold := range uniqueValues {
+			_, _, leftLabels, rightLabels := splitDataConcurrente(data, labels, feature, threshold)
+			if len(leftLabels) == 0 || len(rightLabels) == 0 {
+				continue
+			}
+
+			leftImpurity := giniImpurity(leftLabels)
+			rightImpurity := giniImpurity(rightLabels)
+			totalImpurity := (leftImpurity*float64(len(leftLabels)) + rightImpurity*float64(len(rightLabels))) / float64(len(labels))
+
+			if totalImpurity < bestFeatureImpurity {
+				bestFeatureImpurity = totalImpurity
+				bestFeatureThreshold = threshold
+			}
+		}
+
+		// Enviar el resultado a través del canal
+		resultChan <- SplitResult{feature, bestFeatureThreshold, bestFeatureImpurity}
+	}
+
+	wg.Add(numFeatures)
+
+	for feature := 0; feature < numFeatures; feature++ {
+		go featureWorker(feature)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Encontrar el mejor resultado de las goroutines
+	for result := range resultChan {
+		if result.totalImpurity < bestImpurity {
+			bestImpurity = result.totalImpurity
+			bestFeature = result.feature
+			bestThreshold = result.threshold
+		}
+	}
+
 	return bestFeature, bestThreshold
 }
 
-// Function to predict labels using the decision tree
-func predict(tree *TreeNode, point []float64) float64 {
-	if tree.IsLeaf {
-		return tree.Label
+// Función para hacer predicciones (sin cambios)
+func predictConcurrente(node *Node, point []float64) float64 {
+	if node.Left == nil && node.Right == nil {
+		return node.Prediction
 	}
-	if point[tree.Feature] <= tree.Threshold {
-		return predict(tree.Left, point)
+
+	if point[node.Feature] <= node.Threshold {
+		return predictConcurrente(node.Left, point)
+	} else {
+		return predictConcurrente(node.Right, point)
 	}
-	return predict(tree.Right, point)
 }
 
-// Function to calculate precision
-func precision(tp, fp int) float64 {
+// Función para evaluar el rendimiento del árbol concurrentemente
+func evaluateConcurrente(data [][]float64, labels []float64, tree *Node) {
+	var tp, fp, tn, fn int
+
+	for i, point := range data {
+		predLabel := math.Round(predictConcurrente(tree, point))
+
+		if predLabel == 1.0 && labels[i] == 1.0 {
+			tp++
+		} else if predLabel == 1.0 && labels[i] == 0.0 {
+			fp++
+		} else if predLabel == 0.0 && labels[i] == 0.0 {
+			tn++
+		} else if predLabel == 0.0 && labels[i] == 1.0 {
+			fn++
+		}
+	}
+
+	fmt.Printf("TP: %d, FP: %d, TN: %d, FN: %d\n", tp, fp, tn, fn)
+
+	// Calcular precisión
+	precision := precisionScore(tp, fp)
+	fmt.Printf("Precisión: %.2f\n", precision)
+}
+
+// Función para calcular la precisión
+func precisionScore(tp, fp int) float64 {
 	if tp+fp == 0 {
 		return 0
 	}
 	return float64(tp) / float64(tp+fp)
 }
 
-// Function to calculate recall
-func recall(tp, fn int) float64 {
-	if tp+fn == 0 {
-		return 0
-	}
-	return float64(tp) / float64(tp+fn)
-}
+// Función principal para el árbol de decisión concurrente
+func DecisionTreeConcurrente(data [][]float64, labels []float64) {
+	start := time.Now()
 
-// Function to calculate F1-score
-func f1Score(precision, recall float64) float64 {
-	if precision+recall == 0 {
-		return 0
-	}
-	return 2 * (precision * recall) / (precision + recall)
-}
+	tree := trainDecisionTreeConcurrente(data, labels, 3)
+	evaluateConcurrente(data, labels, tree)
 
-// Función para calcular la accuracy
-func accuracy(tp, tn, fp, fn int) float64 {
-	total := tp + tn + fp + fn
-	if total == 0 {
-		return 0.0 // Evita la división entre 0
-	}
-
-	return float64(tp+tn) / float64(total)
-}
-
-// Function to evaluate the model and write metrics to CSV
-func evaluate(data [][]float64, trueLabels []float64, tree *TreeNode) map[string]float64 {
-	var tp, fp, fn, tn int
-
-	for i, point := range data {
-		predictedLabel := predict(tree, point)
-		actualLabel := trueLabels[i]
-
-		if predictedLabel == actualLabel {
-			if predictedLabel == 1 {
-				tp++
-			} else {
-				tn++
-			}
-		} else {
-			if predictedLabel == 1 {
-				fp++
-			} else {
-				fn++
-			}
-		}
-	}
-
-	precisionVal := precision(tp, fp)
-	recallVal := recall(tp, fn)
-	f1ScoreVal := f1Score(precisionVal, recallVal)
-
-	metrics := map[string]float64{
-		"Precision": precisionVal,
-		"Recall":    recallVal,
-		"F1-Score":  f1ScoreVal,
-	}
-
-	return metrics
-}
-
-func main() {
-	// Example data and labels
-	data := [][]float64{
-		{1.0, 2.0},
-		{2.0, 3.0},
-		{3.0, 1.0},
-	}
-	labels := []float64{1, 1, 0}
-
-	// Build the tree
-	tree := &TreeNode{
-		Feature:   0,
-		Threshold: 2.0,
-		Left: &TreeNode{
-			Label:  1,
-			IsLeaf: true,
-		},
-		Right: &TreeNode{
-			Label:  0,
-			IsLeaf: true,
-		},
-	}
-
-	// Find the best split
-	bestFeature, bestThreshold := findBestSplit(data, labels)
-	fmt.Printf("Best Feature: %d, Best Threshold: %.2f\n", bestFeature, bestThreshold)
-
-	// Evaluate the model
-	metrics := evaluate(data, labels, tree)
-
-	for metric, value := range metrics {
-		fmt.Printf("%s: %f \n", metric, value)
-	}
+	elapsed := time.Since(start)
+	fmt.Printf("Tiempo de ejecución: %s\n", elapsed)
 }

@@ -1,8 +1,9 @@
-package main
+package svm
 
 import (
 	"fmt"
 	"math/rand"
+	"time"
 )
 
 // Estructura del modelo SVM
@@ -29,7 +30,11 @@ func (svm *SVM) predict(inputs []float64) float64 {
 	for i := range inputs {
 		sum += inputs[i] * svm.weights[i]
 	}
-	return sum
+	if sum >= 0 {
+		return 1.0
+	} else {
+		return 0.0
+	}
 }
 
 // Entrena el modelo SVM secuencialmente usando el algoritmo de margen máximo
@@ -37,14 +42,18 @@ func (svm *SVM) trainSequential(data [][]float64, labels []float64, epochs int, 
 	for epoch := 0; epoch < epochs; epoch++ {
 		for i := range data {
 			prediction := svm.predict(data[i])
-			error := labels[i] - prediction
 
-			// Actualizar pesos y sesgo
-			if error != 0 {
+			// Actualización basada en el margen
+			if labels[i]*prediction < 1 {
 				for j := range svm.weights {
-					svm.weights[j] += learningRate*(labels[i]-prediction)*data[i][j] - lambda*svm.weights[j]
+					svm.weights[j] += learningRate * (labels[i]*data[i][j] - lambda*svm.weights[j])
 				}
-				svm.bias += learningRate * (labels[i] - prediction)
+				svm.bias += learningRate * labels[i]
+			} else {
+				// Regularización
+				for j := range svm.weights {
+					svm.weights[j] -= learningRate * lambda * svm.weights[j]
+				}
 			}
 		}
 	}
@@ -103,13 +112,14 @@ func f1Score(precision, recall float64) float64 {
 	return 2 * (precision * recall) / (precision + recall)
 }
 
-func main() {
-	rand.Seed(42) // Inicializa la semilla aleatoria
+func SVMSecuential(train [][]float64, label_train []float64, test [][]float64, label_test []float64) {
+	// rand.Seed(42) // Inicializa la semilla aleatoria
+
+	start := time.Now()
 
 	// Datos de ejemplo
-	data := [][]float64{{2.3, 4.5}, {1.3, 3.5}, {3.3, 2.5}}
-	labels := []float64{1.0, 0.0, 1.0}
-
+	data := train
+	labels := label_train
 	// Inicializar el modelo SVM
 	svm := newSVM(len(data[0]))
 
@@ -124,15 +134,16 @@ func main() {
 
 	// Evaluar el modelo
 	acc := accuracy(predictions, labels)
-	tp, tn, fp, fn := confusionMatrix(predictions, labels)
+	tp, _, fp, fn := confusionMatrix(predictions, labels)
 	prec := precision(tp, fp)
 	rec := recall(tp, fn)
 	f1 := f1Score(prec, rec)
 
-	fmt.Printf("Confusion Matrix:\n")
-	fmt.Printf("TP: %d, TN: %d, FP: %d, FN: %d\n", tp, tn, fp, fn)
 	fmt.Printf("Precision: %.2f\n", prec)
 	fmt.Printf("Accuracy: %.2f\n", acc)
 	fmt.Printf("F1-Score: %.2f\n", f1)
 	fmt.Printf("Recall: %.2f\n", rec)
+
+	elapsed := time.Since(start)
+	fmt.Printf("Tiempo de ejecución: %s\n", elapsed)
 }
