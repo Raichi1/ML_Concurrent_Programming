@@ -1,4 +1,4 @@
-package main
+package dnn
 
 import (
 	"fmt"
@@ -7,179 +7,131 @@ import (
 	"sync"
 )
 
-// Estructura del modelo DNN
-type DNN struct {
-	weights    [][][]float64
-	biases     [][]float64
-	layerSizes []int
-	mu         sync.Mutex
-}
+// Retropropagación
+func (dnn *DNN) backpropagateConcurrent(activations, zs [][]float64, label float64, learningRate float64, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-// Configuración de la red neuronal
-type neuralNetConfig struct {
-	inputNeurons  int
-	outputNeurons int
-	hiddenNeurons int
-	numEpochs     int
-	learningRate  float64
-}
+	// Inicializar los gradientes
+	weightGradients := make([][][]float64, len(dnn.weights))
+	biasGradients := make([][]float64, len(dnn.biases))
 
-// Inicializa el modelo DNN
-func newDNN(layerSizes []int) *DNN {
-	numLayers := len(layerSizes)
-	weights := make([][][]float64, numLayers-1)
-	biases := make([][]float64, numLayers-1)
+	// Derivada del costo respecto a la última capa
+	delta := make([]float64, dnn.layerSizes[len(dnn.layerSizes)-1])
+	for j := range delta {
+		delta[j] = costDerivative(activations[len(activations)-1][j], label) * sigmoidDerivative(zs[len(zs)-1][j])
+	}
 
-	for i := 0; i < numLayers-1; i++ {
-		weights[i] = make([][]float64, layerSizes[i])
-		biases[i] = make([]float64, layerSizes[i+1])
-		for j := 0; j < layerSizes[i]; j++ {
-			weights[i][j] = make([]float64, layerSizes[i+1])
-			for k := 0; k < layerSizes[i+1]; k++ {
-				weights[i][j][k] = rand.Float64()*2 - 1
-			}
-		}
-		for k := 0; k < layerSizes[i+1]; k++ {
-			biases[i][k] = rand.Float64()*2 - 1
+	// Actualizar los gradientes para la última capa
+	biasGradients[len(biasGradients)-1] = delta
+	weightGradients[len(weightGradients)-1] = make([][]float64, dnn.layerSizes[len(dnn.layerSizes)-2])
+	for j := range weightGradients[len(weightGradients)-1] {
+		weightGradients[len(weightGradients)-1][j] = make([]float64, dnn.layerSizes[len(dnn.layerSizes)-1])
+		for k := range weightGradients[len(weightGradients)-1][j] {
+			weightGradients[len(weightGradients)-1][j][k] = activations[len(activations)-2][j] * delta[k]
 		}
 	}
-	return &DNN{
-		weights:    weights,
-		biases:     biases,
-		layerSizes: layerSizes,
-	}
-}
 
-// Función de activación Sigmoid
-func sigmoid(x float64) float64 {
-	return 1.0 / (1.0 + math.Exp(-x))
-}
-
-// Derivada de la función de activación Sigmoid
-func sigmoidDeriv(x float64) float64 {
-	sig := sigmoid(x)
-	return sig * (1 - sig)
-}
-
-// Propagación hacia adelante
-func (dnn *DNN) forward(inputs []float64) []float64 {
-	layerInput := inputs
-	for i := 0; i < len(dnn.weights); i++ {
-		layerOutput := make([]float64, dnn.layerSizes[i+1])
-		for j := 0; j < dnn.layerSizes[i+1]; j++ {
-			sum := dnn.biases[i][j]
-			for k := 0; k < dnn.layerSizes[i]; k++ {
-				sum += layerInput[k] * dnn.weights[i][k][j]
-			}
-			layerOutput[j] = sigmoid(sum)
-		}
-		layerInput = layerOutput
-	}
-	return layerInput
-}
-
-// Ajuste de pesos y sesgos (Backpropagation)
-func (dnn *DNN) backpropagate(inputs []float64, labels []float64, output []float64, learningRate float64) {
-	deltas := make([][]float64, len(dnn.weights))
-	for i := range deltas {
-		deltas[i] = make([]float64, dnn.layerSizes[i+1])
-	}
-
-	// Calcular el error de la capa de salida
-	outputError := make([]float64, dnn.layerSizes[len(dnn.layerSizes)-1])
-	for i := range outputError {
-		outputError[i] = labels[i] - output[i]
-	}
-	deltas[len(deltas)-1] = outputError
-
-	// Calcular el error de las capas ocultas
-	for i := len(dnn.weights) - 1; i >= 0; i-- {
-		layerDelta := make([]float64, dnn.layerSizes[i])
-		for j := range layerDelta {
+	// Retropropagación para capas anteriores
+	for l := len(zs) - 2; l >= 0; l-- {
+		nextDelta := make([]float64, dnn.layerSizes[l+1])
+		for j := range nextDelta {
 			sum := 0.0
-			for k := range deltas[i] {
-				sum += deltas[i][k] * dnn.weights[i][j][k]
+			for k := range delta {
+				sum += dnn.weights[l+1][j][k] * delta[k]
 			}
-			layerDelta[j] = sum * sigmoidDeriv(sum)
+			nextDelta[j] = sum * sigmoidDerivative(zs[l][j])
 		}
-		if i > 0 {
-			deltas[i-1] = layerDelta
-		}
+		delta = nextDelta
 
-		// Actualizar pesos y sesgos
-		dnn.mu.Lock()
+		biasGradients[l] = delta
+		weightGradients[l] = make([][]float64, dnn.layerSizes[l])
+		for j := range weightGradients[l] {
+			weightGradients[l][j] = make([]float64, dnn.layerSizes[l+1])
+			for k := range weightGradients[l][j] {
+				weightGradients[l][j][k] = activations[l][j] * delta[k]
+			}
+		}
+	}
+
+	// Actualizar pesos y sesgos
+	for i := range dnn.weights {
 		for j := range dnn.weights[i] {
 			for k := range dnn.weights[i][j] {
-				dnn.weights[i][j][k] += learningRate * deltas[i][k] * inputs[j]
+				dnn.weights[i][j][k] -= learningRate * weightGradients[i][j][k]
 			}
 		}
 		for j := range dnn.biases[i] {
-			dnn.biases[i][j] += learningRate * deltas[i][j]
-		}
-		dnn.mu.Unlock()
-
-		// Actualizar inputs para la capa anterior
-		if i > 0 {
-			newInputs := make([]float64, dnn.layerSizes[i])
-			for j := range newInputs {
-				sum := dnn.biases[i-1][j]
-				for k := range inputs {
-					sum += inputs[k] * dnn.weights[i-1][k][j]
-				}
-				newInputs[j] = sigmoid(sum)
-			}
-			inputs = newInputs
+			dnn.biases[i][j] -= learningRate * biasGradients[i][j]
 		}
 	}
 }
 
-// Entrenamiento de la red neuronal profunda concurrentemente
-func (dnn *DNN) trainConcurrent(data [][]float64, labels [][]float64, epochs int, learningRate float64) {
+// Métricas de evaluación: precisión y MSE
+func evaluateConcurrent(dnn *DNN, data [][]float64, labels []float64) (float64, float64) {
+	var correctPredictions int
+	var totalMSE float64
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i := range data {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			outputs, _ := dnn.forward(data[i])
+			prediction := math.Round(outputs[len(outputs)-1][0]) // Redondear la salida para obtener 0 o 1
+			mu.Lock()
+			if prediction == labels[i] {
+				correctPredictions++
+			}
+			totalMSE += costFunction(outputs[len(outputs)-1][0], labels[i])
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+
+	accuracy := float64(correctPredictions) / float64(len(data))
+	return accuracy, totalMSE / float64(len(data))
+}
+
+// Entrenamiento de la red neuronal profunda
+func (dnn *DNN) trainConcurrent(trainData, testData [][]float64, trainLabels, testLabels []float64, epochs int, learningRate float64) {
 	for epoch := 0; epoch < epochs; epoch++ {
+		totalCost := 0.0
 		var wg sync.WaitGroup
-		for i := range data {
+
+		for i := range trainData {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				output := dnn.forward(data[i])
-				dnn.backpropagate(data[i], labels[i], output, learningRate)
+				activations, zs := dnn.forward(trainData[i])
+				totalCost += costFunction(activations[len(activations)-1][0], trainLabels[i])
+				dnn.backpropagateConcurrent(activations, zs, trainLabels[i], learningRate, &wg)
 			}(i)
 		}
 		wg.Wait()
+
+		trainAccuracy, trainMSE := evaluateConcurrent(dnn, trainData, trainLabels)
+		testAccuracy, testMSE := evaluateConcurrent(dnn, testData, testLabels)
+		fmt.Printf("Epoch %d: Costo: %f, Precisión entrenamiento: %f, MSE entrenamiento: %f, Precisión prueba: %f, MSE prueba: %f\n",
+			epoch, totalCost, trainAccuracy, trainMSE, testAccuracy, testMSE)
 	}
 }
 
-func main() {
-	// Datos de ejemplo
-	inputs := [][]float64{
-		{0.1, 0.2, 0.3, 0.4},
-		{0.5, 0.6, 0.7, 0.8},
-		{0.9, 1.0, 1.1, 1.2},
-	}
-	labels := [][]float64{
-		{0.0},
-		{1.0},
-		{0.0},
-	}
+func DNNConcurrent(train [][]float64, trainLabel []float64, test [][]float64, testLabel []float64) {
+	rand.Seed(42)
 
-	// Definir la arquitectura de la red y los parámetros de aprendizaje.
-	config := neuralNetConfig{
-		inputNeurons:  4,
-		outputNeurons: 1,
-		hiddenNeurons: 5,
-		numEpochs:     1000,
-		learningRate:  0.01,
-	}
+	// Definir la arquitectura de la red neuronal profunda
+	layerSizes := []int{3, 5, 5, 1} // Última capa con 1 neurona para etiquetas como valor único
 
-	// Crear la red neuronal profunda.
-	dnn := newDNN([]int{config.inputNeurons, config.hiddenNeurons, config.outputNeurons})
+	// Crear red neuronal profunda
+	dnn := newDNN(layerSizes)
 
-	// Entrenar la red neuronal profunda concurrentemente.
-	dnn.trainConcurrent(inputs, labels, config.numEpochs, config.learningRate)
+	// Entrenar red neuronal profunda
+	dnn.trainConcurrent(train, test, trainLabel, testLabel, 1000, 0.0001)
 
-	// Hacer predicciones y evaluar el modelo.
-	for _, input := range inputs {
-		output := dnn.forward(input)
-		fmt.Printf("Input: %v, Output: %v\n", input, output)
-	}
+	// // Hacer predicciones
+	// for _, d := range test {
+	// 	outputs, _ := dnn.forward(d)
+	// 	fmt.Println("Predicción:", outputs[len(outputs)-1])
+	// }
 }

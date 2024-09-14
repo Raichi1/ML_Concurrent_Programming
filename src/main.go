@@ -9,6 +9,7 @@ import (
 	ann "src/models/ann"
 	recommendation "src/models/colaborative_filter"
 	decisiontree "src/models/decision_tree"
+	dnn "src/models/dnn"
 	randomforest "src/models/random_forest"
 	svmachine "src/models/svm"
 	"strconv"
@@ -283,6 +284,20 @@ func rfConcurrent(filepath string) {
 	randomforest.RandomForestSecuential(train, trainL, test, testL)
 }
 
+func dnnSecuential(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
+
+	train, test, trainLabel, testLabel, _ := split.SplitData(features, labels, 0.2)
+	dnn.DNNSecuential(train, trainLabel, test, testLabel)
+}
+
+func dnnConcurrent(filepath string) {
+	features, labels, _ := getDataFrame(filepath, true)
+
+	train, test, trainLabel, testLabel, _ := split.SplitData(features, labels, 0.2)
+	dnn.DNNConcurrent(train, trainLabel, test, testLabel)
+}
+
 func main() {
 
 	filepath := "dataset/bank.csv"
@@ -317,4 +332,10 @@ func main() {
 	fmt.Printf("=================================================\n")
 	fmt.Printf("RANDOM FOREST CONCURRENT\n")
 	rfSecuential(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("DEEP NEURONAL NETWORK SECUENTIAL\n")
+	dnnSecuential(filepath)
+	fmt.Printf("=================================================\n")
+	fmt.Printf("DEEP NEURONAL NETWORK CONCURRENT\n")
+	dnnConcurrent(filepath)
 }
