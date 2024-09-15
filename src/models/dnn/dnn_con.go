@@ -8,9 +8,7 @@ import (
 )
 
 // Retropropagación
-func (dnn *DNN) backpropagateConcurrent(activations, zs [][]float64, label float64, learningRate float64, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func (dnn *DNN) backpropagateConcurrent(activations, zs [][]float64, label float64, learningRate float64) {
 	// Inicializar los gradientes
 	weightGradients := make([][][]float64, len(dnn.weights))
 	biasGradients := make([][]float64, len(dnn.biases))
@@ -53,7 +51,11 @@ func (dnn *DNN) backpropagateConcurrent(activations, zs [][]float64, label float
 		}
 	}
 
-	// Actualizar pesos y sesgos
+	// Bloquear actualizaciones de pesos y sesgos
+	var mu sync.Mutex
+	mu.Lock()
+	defer mu.Unlock()
+
 	for i := range dnn.weights {
 		for j := range dnn.weights[i] {
 			for k := range dnn.weights[i][j] {
@@ -93,19 +95,22 @@ func evaluateConcurrent(dnn *DNN, data [][]float64, labels []float64) (float64, 
 	return accuracy, totalMSE / float64(len(data))
 }
 
-// Entrenamiento de la red neuronal profunda
+// Entrenamiento de la red neuronal profunda concurrente
 func (dnn *DNN) trainConcurrent(trainData, testData [][]float64, trainLabels, testLabels []float64, epochs int, learningRate float64) {
 	for epoch := 0; epoch < epochs; epoch++ {
 		totalCost := 0.0
 		var wg sync.WaitGroup
+		var mu sync.Mutex
 
 		for i := range trainData {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
 				activations, zs := dnn.forward(trainData[i])
+				mu.Lock()
 				totalCost += costFunction(activations[len(activations)-1][0], trainLabels[i])
-				dnn.backpropagateConcurrent(activations, zs, trainLabels[i], learningRate, &wg)
+				mu.Unlock()
+				dnn.backpropagateConcurrent(activations, zs, trainLabels[i], learningRate)
 			}(i)
 		}
 		wg.Wait()

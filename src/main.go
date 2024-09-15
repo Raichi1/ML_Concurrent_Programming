@@ -10,11 +10,55 @@ import (
 	recommendation "src/models/colaborative_filter"
 	decisiontree "src/models/decision_tree"
 	dnn "src/models/dnn"
+	underFactors "src/models/factores_latentes"
 	randomforest "src/models/random_forest"
 	svmachine "src/models/svm"
 	"strconv"
 	"time"
 )
+
+func readCSVToRatingsMap(filePath string) (map[string]map[string]float64, error) {
+	// Abrir archivo CSV
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// Crear un lector CSV
+	reader := csv.NewReader(file)
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// El mapa resultante de usuarios y calificaciones
+	ratings := make(map[string]map[string]float64)
+
+	// La primera fila contiene los nombres de las películas
+	items := rows[0] // Primera fila: nombres de los ítems
+
+	// Leer cada fila (usuario)
+	for i, row := range rows[1:] {
+		user := fmt.Sprintf("User%d", i+1) // Asignar nombres automáticos a los usuarios (User1, User2, ...)
+		ratings[user] = make(map[string]float64)
+
+		// Leer las calificaciones del usuario
+		for j, ratingStr := range row {
+			// Ignorar calificaciones que sean "0"
+			if ratingStr != "" && ratingStr != "0" {
+				rating, err := strconv.ParseFloat(ratingStr, 64)
+				if err != nil {
+					return nil, err
+				}
+				// Agregar solo si la calificación no es cero
+				ratings[user][items[j]] = rating
+			}
+		}
+	}
+
+	return ratings, nil
+}
 
 func splitFeaturesAndTarget(data [][]float64) ([][]float64, []float64) {
 	numRows := len(data)
@@ -94,9 +138,9 @@ func getDataFrame(filepath string, skipHeader bool) ([][]float64, []float64, err
 	return features, target, nil
 }
 
-func colaborativeFilterCon() {
+func colaborativeFilterCon(filepath string) {
 	// Abrir el archivo CSV
-	file, err := os.Open("dataset/clean_songs.csv")
+	file, err := os.Open(filepath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -152,9 +196,9 @@ func colaborativeFilterCon() {
 	fmt.Printf("Tiempo de ejecución: %s\n", elapsed)
 }
 
-func colaborativeFilter() {
+func colaborativeFilter(filepath string) {
 	// Abrir el archivo CSV
-	file, err := os.Open("dataset/clean_songs.csv")
+	file, err := os.Open(filepath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -298,44 +342,69 @@ func dnnConcurrent(filepath string) {
 	dnn.DNNConcurrent(train, trainLabel, test, testLabel)
 }
 
+func underlyingFactorsSecuential(filepath string) {
+	ratings, _ := readCSVToRatingsMap(filepath)
+
+	underFactors.UnderlyingFactors(ratings)
+}
+
+func underlyingFactorsConcurrent(filepath string) {
+	ratings, _ := readCSVToRatingsMap(filepath)
+
+	underFactors.UnderlyingFactorsConcurrent(ratings)
+}
+
 func main() {
 
 	filepath := "dataset/bank.csv"
+	fileparthraking := "dataset/clean_movies.csv"
 
-	fmt.Printf("=================================================\n")
-	fmt.Printf("FILTRADO COLABORATIVO CONCURRENTE\n")
-	colaborativeFilterCon()
-	fmt.Printf("=================================================\n")
-	fmt.Printf("FILTRADO COLABORATIVO SECUENCIAL\n")
-	colaborativeFilter()
-	fmt.Printf("=================================================\n")
-	fmt.Printf("SUPPORT VECTORIAL MACHINE CONCURRENTE\n")
+	fmt.Printf("======================== COLLABORATIVE FILTERING =======================\n")
+	fmt.Printf("SECUENCIAL\n")
+	colaborativeFilter(fileparthraking)
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("CONCURRENTE\n")
+	colaborativeFilterCon(fileparthraking)
+
+	fmt.Printf("======================= SUPPORT VECTORIAL MACHINE ======================\n")
+	fmt.Printf("CONCURRENTE\n")
 	svmConcurrent(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("SUPPORT VECTORIAL MACHINE SECUENCIAL\n")
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("SECUENCIAL\n")
 	svmSecuential(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("DECISION TREE SECUENCIAL\n")
+
+	fmt.Printf("============================ DECISION TREE =============================\n")
+	fmt.Printf("SECUENCIAL\n")
 	decisionTreeSecuencial(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("DECISION TREE CONCURRENTE\n")
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("CONCURRENTE\n")
 	decisionTreeConcurrent(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("ARTIFICIAL NEURONAL NETWORK SECUENTIAL\n")
+
+	fmt.Printf("====================== ARTIFICIAL NEURONAL NETWORK =====================\n")
+	fmt.Printf("SECUENTIAL\n")
 	annSecuential(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("ARTIFICIAL NEURONAL NETWORK CONCURRENTE\n")
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("CONCURRENTE\n")
 	annConcurrent(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("RANDOM FOREST SECUENTIAL\n")
+
+	fmt.Printf("============================ RANDOM FOREST ============================\n")
+	fmt.Printf("SECUENTIAL\n")
 	rfSecuential(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("RANDOM FOREST CONCURRENT\n")
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("CONCURRENT\n")
 	rfSecuential(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("DEEP NEURONAL NETWORK SECUENTIAL\n")
+
+	fmt.Printf("========================= DEEP NEURONAL NETWORK ========================\n")
+	fmt.Printf("SECUENTIAL\n")
 	dnnSecuential(filepath)
-	fmt.Printf("=================================================\n")
-	fmt.Printf("DEEP NEURONAL NETWORK CONCURRENT\n")
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("CONCURRENT\n")
 	dnnConcurrent(filepath)
+
+	fmt.Printf("====================== UNDERLYING FACTORS NETWORK ======================\n")
+	fmt.Printf("SECUENTIAL\n")
+	underlyingFactorsSecuential(fileparthraking)
+	fmt.Printf("========================================================================\n")
+	fmt.Printf("CONCURRENT\n")
+	underlyingFactorsConcurrent(filepath)
 }

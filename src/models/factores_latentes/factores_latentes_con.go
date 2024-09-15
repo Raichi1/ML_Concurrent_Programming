@@ -1,52 +1,23 @@
-package main
+package factoreslatentes
 
 import (
-	"math"
+	"fmt"
 	"sync"
+	"time"
 )
 
-var ratings = map[string]map[string]float64{
-	"User1": {"Item1": 5, "Item2": 3, "Item3": 4},
-	"User2": {"Item1": 4, "Item2": 2, "Item3": 5},
-	"User3": {"Item1": 1, "Item2": 5, "Item3": 3},
-}
-
-func pearsonSimilarity(user1, user2 map[string]float64) float64 {
-	var sum1, sum2, sum1Sq, sum2Sq, pSum float64
-	var n int
-
-	for item := range user1 {
-		if _, ok := user2[item]; ok {
-			n++
-			sum1 += user1[item]
-			sum2 += user2[item]
-			sum1Sq += math.Pow(user1[item], 2)
-			sum2Sq += math.Pow(user2[item], 2)
-			pSum += user1[item] * user2[item]
-		}
-	}
-
-	if n == 0 {
-		return 0
-	}
-
-	num := pSum - (sum1 * sum2 / float64(n))
-	den := math.Sqrt((sum1Sq - math.Pow(sum1, 2)/float64(n)) * (sum2Sq - math.Pow(sum2, 2)/float64(n)))
-
-	if den == 0 {
-		return 0
-	}
-
-	return num / den
-}
-
-func getRecommendationsConcurrent(user string, ratings map[string]map[string]float64) map[string]float64 {
+// Función para obtener recomendaciones concurrentemente
+func getRecommendationsConcurrent(user string, ratings map[string]map[string]float64, similarityFunc func(map[string]float64, map[string]float64) float64) map[string]float64 {
 	scores := make(map[string]float64)
 	simSums := make(map[string]float64)
-	var mu sync.Mutex
+
+	// Normaliza las calificaciones del usuario objetivo
+	normalizedUserRatings := normalizeRatings(ratings[user])
 
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 
+	// Goroutine para calcular similitud y recomendaciones
 	for otherUser, otherRatings := range ratings {
 		if otherUser == user {
 			continue
@@ -55,17 +26,25 @@ func getRecommendationsConcurrent(user string, ratings map[string]map[string]flo
 		wg.Add(1)
 		go func(otherUser string, otherRatings map[string]float64) {
 			defer wg.Done()
-			similarity := pearsonSimilarity(ratings[user], otherRatings)
+
+			// Normaliza las calificaciones del otro usuario
+			normalizedOtherRatings := normalizeRatings(otherRatings)
+
+			// Calcula la similitud (ya sea Pearson o Coseno)
+			similarity := similarityFunc(normalizedUserRatings, normalizedOtherRatings)
 
 			if similarity <= 0 {
 				return
 			}
 
+			// Bloquear para acceder a scores y simSums concurrentemente
 			mu.Lock()
 			defer mu.Unlock()
 
+			// Recorre los ítems calificados por otros usuarios
 			for item, rating := range otherRatings {
 				if _, ok := ratings[user][item]; !ok {
+					// Suma ponderada de las calificaciones por la similitud
 					scores[item] += similarity * rating
 					simSums[item] += similarity
 				}
@@ -73,8 +52,10 @@ func getRecommendationsConcurrent(user string, ratings map[string]map[string]flo
 		}(otherUser, otherRatings)
 	}
 
+	// Espera a que todas las goroutines terminen
 	wg.Wait()
 
+	// Calcula la puntuación ponderada final
 	for item := range scores {
 		scores[item] /= simSums[item]
 	}
@@ -82,8 +63,20 @@ func getRecommendationsConcurrent(user string, ratings map[string]map[string]flo
 	return scores
 }
 
-// func main() {
-// 	user := "User1"
-// 	recommendations := getRecommendationsConcurrent(user, ratings)
-// 	fmt.Println("Recomendaciones concurrentes para", user, ":", recommendations)
-// }
+func UnderlyingFactorsConcurrent(ratings map[string]map[string]float64) {
+
+	start := time.Now()
+
+	user := "User100"
+
+	// Escoge entre pearsonSimilarity o cosineSimilarity
+	recommendations := getRecommendationsConcurrent(user, ratings, pearsonSimilarity)
+	fmt.Println("Recomendaciones para", user, ":", recommendations)
+
+	// También puedes probar con la similitud coseno:
+	cosineRecommendations := getRecommendationsConcurrent(user, ratings, cosineSimilarity)
+	fmt.Println("Recomendaciones con Coseno para", user, ":", cosineRecommendations)
+
+	elapsed := time.Since(start)
+	fmt.Printf("Tiempo de ejecución: %s\n", elapsed)
+}
